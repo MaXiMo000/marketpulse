@@ -5,14 +5,16 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.ledger import BUY_BANDS, SELL_BANDS, cash, fills_for, in_cooldown, latest_prices, latest_scores, position_stats
+from app.ledger import (
+    BUY_BANDS, SELL_BANDS, cash, equity, fills_for, in_cooldown, latest_prices, latest_scores, position_stats, prior_equity,
+)
 from app.models import Portfolio, Position, Ticker
 from app.security import PROTECTED
 from app.schemas import (
     FillOut, HoldingOut, LiveAck, PlanOut, PortfolioIn, PortfolioOut, PositionOut, PositionsOut,
     ScoreOut, Summary, TodayRow, TrancheOut,
 )
-from app.sizing import plan_entry
+from app.sizing import TIERS, plan_entry
 
 router = APIRouter(prefix="/v1/portfolios", dependencies=PROTECTED)
 
@@ -24,9 +26,20 @@ def _portfolio(db: Session, portfolio_id: int) -> Portfolio:
     return pf
 
 
+def _breaker_tripped(pf: Portfolio, today) -> bool:
+    return today is not None and pf.breaker_date == today
+
+
 def _out(db: Session, pf: Portfolio) -> PortfolioOut:
-    return PortfolioOut(id=pf.id, total_value=pf.total_value, risk_tier=pf.risk_tier, mode=pf.mode,
-                        live_ack_at=pf.live_ack_at, cash=cash(db, pf))
+    prices = latest_prices(db)
+    today = max((d for d, _ in prices.values()), default=None)
+    eq = equity(db, pf, prices)
+    prior = prior_equity(db, pf, today) if today else pf.total_value
+    return PortfolioOut(
+        id=pf.id, total_value=pf.total_value, risk_tier=pf.risk_tier, mode=pf.mode, live_ack_at=pf.live_ack_at,
+        cash=cash(db, pf), equity=eq, day_change=eq / prior - 1 if prior > 0 else 0.0,
+        daily_loss_limit=TIERS[pf.risk_tier].daily_loss_limit_pct, breaker_tripped=_breaker_tripped(pf, today),
+    )
 
 
 @router.post("", response_model=PortfolioOut, status_code=201)
@@ -70,6 +83,7 @@ def today(portfolio_id: int, db: Session = Depends(get_db)):
     pf = _portfolio(db, portfolio_id)
     scores, prices = latest_scores(db), latest_prices(db)
     free = cash(db, pf)
+    tripped = _breaker_tripped(pf, max((d for d, _ in prices.values()), default=None))
     active = {
         p.ticker_id: p
         for p in db.scalars(select(Position).where(Position.portfolio_id == pf.id, Position.status != "closed"))
@@ -85,7 +99,9 @@ def today(portfolio_id: int, db: Session = Depends(get_db)):
                                  unrealized_pnl=stats.held * (price - stats.avg_entry))
         if score and price is not None:
             if score.band in BUY_BANDS and pos is None:
-                if in_cooldown(db, pf.id, t.id, price_date):
+                if tripped:
+                    note = "circuit breaker tripped: new buying is paused for today"
+                elif in_cooldown(db, pf.id, t.id, price_date):
                     note = "cooling down after a recent exit"
                 elif ep := plan_entry(pf.total_value, pf.risk_tier, price, free):
                     plan = PlanOut(

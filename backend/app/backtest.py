@@ -49,9 +49,16 @@ def align(series: dict[str, list[tuple[date, float]]]) -> tuple[list[date], dict
     return dates, {sym: [by_date[sym][d] for d in dates] for sym in series}
 
 
+LOOKBACK = 300  # bars of history a score can depend on; RSI smoothing has fully converged well before this
+
+
 def scored_history(closes: list[float], bench: list[float]) -> list[Score]:
     """Score for each day from the first with enough history. Entry k is for index MIN_CLOSES-1+k, using data up to it only."""
-    return [evaluate(closes[: i + 1], bench[: i + 1])[1] for i in range(MIN_CLOSES - 1, len(closes))]
+    out = []
+    for i in range(MIN_CLOSES - 1, len(closes)):
+        lo = max(0, i - LOOKBACK + 1)
+        out.append(evaluate(closes[lo: i + 1], bench[lo: i + 1])[1])
+    return out
 
 
 # ---------- statistics ----------

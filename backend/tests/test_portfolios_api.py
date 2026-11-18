@@ -21,7 +21,8 @@ def test_create_portfolio_defaults_to_paper_with_full_cash(env):
     r = client.post("/v1/portfolios", json={"total_value": 50_000, "risk_tier": "conservative"})
     assert r.status_code == 201
     assert r.json() == {"id": 1, "total_value": 50_000, "risk_tier": "conservative",
-                        "mode": "paper", "live_ack_at": None, "cash": 50_000}
+                        "mode": "paper", "live_ack_at": None, "cash": 50_000, "equity": 50_000,
+                        "day_change": 0.0, "daily_loss_limit": 0.01, "breaker_tripped": False}
     assert [p["id"] for p in client.get("/v1/portfolios").json()] == [1]
 
 
@@ -175,3 +176,27 @@ def test_paper_simulation_never_touches_a_live_portfolio(env):
     # the live portfolio still gets today's sized plan to act on
     [row] = client.get(f"/v1/portfolios/{live_id}/today").json()
     assert row["plan"]["kind"] == "entry"
+
+
+
+def test_breaker_state_is_visible_and_pauses_new_entry_plans_but_not_exit_plans(env):
+    client, engine = env
+    pid = make_portfolio(client)
+    with Session(engine) as s:
+        syms = [add_ticker(s, f"T{i:02d}") for i in range(20)]
+        for t in syms:
+            market(s, t, MON, "Buy", 100)
+        advance_all(s)                                   # 20 first tranches: $40,000 held
+        for t in syms:
+            market(s, t, TUE, "Buy", 94)                 # -6%: -2.4% of equity, past the 2% moderate limit
+        late = add_ticker(s, "LATE")
+        market(s, late, TUE, "Buy", 100)
+        advance_all(s)
+        market(s, syms[0], TUE, "Sell", 94, hour=16)     # a held name turns to Sell later the same day
+
+    p = client.get(f"/v1/portfolios/{pid}").json()
+    assert p["breaker_tripped"] is True
+    assert p["day_change"] == pytest.approx(-0.024, abs=1e-4) and p["daily_loss_limit"] == 0.02
+    rows = {r["symbol"]: r for r in client.get(f"/v1/portfolios/{pid}/today").json()}
+    assert rows["LATE"]["plan"] is None and "circuit breaker" in rows["LATE"]["note"]
+    assert rows["T00"]["plan"]["kind"] == "exit"          # reducing risk is never blocked

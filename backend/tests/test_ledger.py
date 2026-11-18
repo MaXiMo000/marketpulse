@@ -187,3 +187,99 @@ def test_advance_all_commits_for_every_portfolio(s, pf):
     market(s, t, MON, "Strong Buy", 100)
     advance_all(s)
     assert len(s.scalars(select(Position)).all()) == 2
+
+
+# ---------- daily-loss circuit breaker ----------
+# 20 positions with their first tranche filled hold $40,000 (40% of equity), so a 6% fall costs 2.4%: past the 2% limit
+# for the moderate tier, but above every 92 stop-loss.
+
+def _many(s, n):
+    return [ticker(s, f"T{i:02d}") for i in range(n)]
+
+
+def _day(s, pf, tickers, day, band, price, hour=15):
+    at = None
+    for t in tickers:
+        at = market(s, t, day, band, price, hour)
+    advance_portfolio(s, pf, now=at)
+    s.commit()
+
+
+def _buys(s):
+    return len([f for f in fills(s) if f.side == "buy"])
+
+
+def test_breaker_trips_on_a_big_down_day_and_pauses_only_new_buying(s, pf):
+    tickers = _many(s, 20)
+    _day(s, pf, tickers, MON, "Buy", 100)
+    _day(s, pf, tickers, TUE, "Buy", 100)
+    assert _buys(s) == 20
+    late = ticker(s, "LATE")
+    for t in tickers:
+        market(s, t, WED, "Buy", 94)                      # -6%: tranche 2 is due today, and LATE is a fresh Buy
+    advance_portfolio(s, pf, now=market(s, late, WED, "Buy", 100))
+    s.commit()
+
+    s.refresh(pf)
+    assert pf.breaker_date == WED
+    assert _buys(s) == 20                                 # tranche 2 did not fill
+    assert s.scalars(select(Position).where(Position.ticker_id == late.id)).first() is None
+
+
+def test_exits_still_run_while_the_breaker_is_tripped(s, pf):
+    tickers = _many(s, 20)
+    _day(s, pf, tickers, MON, "Buy", 100)
+    _day(s, pf, tickers, TUE, "Buy", 85)                  # a crash through every stop
+    s.refresh(pf)
+    assert pf.breaker_date == TUE
+    assert [f.reason for f in fills(s) if f.side == "sell"] == ["stop"] * 20
+
+
+def test_breaker_resets_on_the_next_data_day(s, pf):
+    tickers = _many(s, 20)
+    _day(s, pf, tickers, MON, "Buy", 100)
+    _day(s, pf, tickers, TUE, "Buy", 100)
+    late = ticker(s, "LATE")
+    for t in tickers:
+        market(s, t, WED, "Buy", 94)
+    advance_portfolio(s, pf, now=market(s, late, WED, "Buy", 100))
+    s.commit()
+    assert s.scalars(select(Position).where(Position.ticker_id == late.id)).first() is None
+
+    for t in tickers:
+        market(s, t, THU, "Buy", 95)                      # a recovery day: no new breaker
+    advance_portfolio(s, pf, now=market(s, late, THU, "Buy", 100))
+    s.commit()
+    assert s.scalars(select(Position).where(Position.ticker_id == late.id)).first() is not None
+
+
+def test_small_moves_never_trip_the_breaker(s, pf):
+    tickers = _many(s, 20)
+    _day(s, pf, tickers, MON, "Buy", 100)
+    _day(s, pf, tickers, TUE, "Buy", 99)                  # -1% on 40% of equity = -0.4%
+    s.refresh(pf)
+    assert pf.breaker_date is None
+
+
+def test_baseline_is_the_previous_days_equity_and_one_snapshot_is_kept_per_day(s, pf):
+    from app.models import EquitySnapshot
+
+    tickers = _many(s, 10)
+    _day(s, pf, tickers, MON, "Buy", 100)
+    _day(s, pf, tickers, MON, "Buy", 100, hour=16)        # a second cycle on the same day
+    snaps = s.scalars(select(EquitySnapshot).order_by(EquitySnapshot.data_date)).all()
+    assert len(snaps) == 1 and snaps[0].data_date == MON
+    assert snaps[0].equity == pytest.approx(100_000)      # bought at the same close it is valued at
+
+    _day(s, pf, tickers, TUE, "Buy", 110)
+    assert [round(x.equity) for x in s.scalars(select(EquitySnapshot).order_by(EquitySnapshot.data_date))] == [100_000, 102_000]
+
+
+def test_breaker_decision_is_a_pure_comparison_against_the_tier_limit():
+    from app.ledger import breaker_tripped
+
+    assert breaker_tripped(equity_now=97_900, prior_equity=100_000, tier="moderate")       # -2.1% vs a 2% limit
+    assert not breaker_tripped(equity_now=98_100, prior_equity=100_000, tier="moderate")   # -1.9%
+    assert breaker_tripped(equity_now=98_500, prior_equity=100_000, tier="conservative")   # -1.5% vs 1%
+    assert not breaker_tripped(equity_now=105_000, prior_equity=100_000, tier="aggressive")
+    assert not breaker_tripped(equity_now=0, prior_equity=0, tier="moderate")               # no baseline: never trips

@@ -74,3 +74,8 @@ def test_add_trading_days_skips_weekends():
     assert add_trading_days(date(2025, 7, 4), 2) == date(2025, 7, 8)   # Fri + 2 -> Tue
     assert add_trading_days(date(2025, 7, 7), 4) == date(2025, 7, 11)  # Mon + 4 -> Fri
     assert add_trading_days(date(2025, 7, 9), 0) == date(2025, 7, 9)
+
+
+def test_every_tier_has_a_daily_loss_limit_that_grows_with_risk_appetite():
+    limits = [TIERS[t].daily_loss_limit_pct for t in ("conservative", "moderate", "aggressive")]
+    assert limits == sorted(limits) and all(0 < x < 0.1 for x in limits)

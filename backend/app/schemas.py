@@ -67,6 +67,10 @@ class PortfolioOut(BaseModel):
     mode: str
     live_ack_at: datetime | None
     cash: float
+    equity: float
+    day_change: float          # equity vs the previous day's close, as a fraction
+    daily_loss_limit: float    # the fall that trips the circuit breaker, as a fraction
+    breaker_tripped: bool      # new buying is paused for the current data day
 
 
 class TrancheOut(BaseModel):

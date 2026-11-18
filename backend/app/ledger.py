@@ -10,8 +10,8 @@ from datetime import date, datetime, timezone
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
-from app.models import CompositeScore, Fill, Portfolio, Position, PriceSnapshot, Ticker
-from app.sizing import TRANCHE_OFFSETS, TRIM_FRACTION, add_trading_days, plan_entry, split_tranches, trail_stop
+from app.models import CompositeScore, EquitySnapshot, Fill, Portfolio, Position, PriceSnapshot, Ticker
+from app.sizing import TIERS, TRANCHE_OFFSETS, TRIM_FRACTION, add_trading_days, plan_entry, split_tranches, trail_stop
 
 BUY_BANDS = {"Strong Buy", "Buy"}
 SELL_BANDS = {"Sell", "Strong Sell"}  # composite below the Hold threshold
@@ -76,6 +76,31 @@ def latest_prices(session: Session) -> dict[int, tuple[date, float]]:
     return {tid: (d, close) for tid, d, close in rows}
 
 
+def equity(session: Session, portfolio: Portfolio, prices: dict[int, tuple[date, float]]) -> float:
+    """Cash plus open positions at the latest close (at average entry if a ticker has no price)."""
+    held = 0.0
+    for pos in session.scalars(select(Position).where(Position.portfolio_id == portfolio.id, Position.status != "closed")):
+        st = position_stats(fills_for(session, pos.id))
+        px = prices.get(pos.ticker_id)
+        held += st.held * (px[1] if px else st.avg_entry)
+    return cash(session, portfolio) + held
+
+
+def prior_equity(session: Session, portfolio: Portfolio, today: date) -> float:
+    """Equity at the end of the previous data day, or the starting capital before there is one."""
+    snap = session.scalar(
+        select(EquitySnapshot)
+        .where(EquitySnapshot.portfolio_id == portfolio.id, EquitySnapshot.data_date < today)
+        .order_by(EquitySnapshot.data_date.desc())
+    )
+    return snap.equity if snap else portfolio.total_value
+
+
+def breaker_tripped(equity_now: float, prior_equity: float, tier: str) -> bool:
+    """The daily-loss circuit breaker: equity down by the tier's limit or more since the previous close."""
+    return prior_equity > 0 and equity_now / prior_equity - 1 <= -TIERS[tier].daily_loss_limit_pct
+
+
 def in_cooldown(session: Session, portfolio_id: int, ticker_id: int, data_date: date) -> bool:
     last_exit = session.scalar(
         select(func.max(Fill.data_date))
@@ -85,7 +110,7 @@ def in_cooldown(session: Session, portfolio_id: int, ticker_id: int, data_date: 
     return last_exit is not None and data_date < add_trading_days(last_exit, REENTRY_COOLDOWN_DAYS)
 
 
-def _step(session: Session, portfolio: Portfolio, pos: Position, band: str, data_date: date, price: float, now: datetime) -> None:
+def _step(session: Session, portfolio: Portfolio, pos: Position, band: str, data_date: date, price: float, now: datetime, halted: bool) -> None:
     stats = position_stats(fills_for(session, pos.id))
 
     if stats.held > 0:
@@ -118,6 +143,8 @@ def _step(session: Session, portfolio: Portfolio, pos: Position, band: str, data
         if stats.bought == 0:
             pos.status, pos.closed_at, pos.close_reason = "closed", now, "cancelled"
         return
+    if halted:  # circuit breaker: no new buying today; exits and cancellations above still run
+        return
 
     free = cash(session, portfolio)
     while filled_tranches < len(sizes) and data_date >= add_trading_days(pos.plan_date, TRANCHE_OFFSETS[filled_tranches]):
@@ -134,6 +161,12 @@ def _step(session: Session, portfolio: Portfolio, pos: Position, band: str, data
 def advance_portfolio(session: Session, portfolio: Portfolio, now: datetime | None = None) -> None:
     now = now or datetime.now(timezone.utc)
     scores, prices = latest_scores(session), latest_prices(session)
+    today = max((d for d, _ in prices.values()), default=None)
+    if today is not None and breaker_tripped(
+        equity(session, portfolio, prices), prior_equity(session, portfolio, today), portfolio.risk_tier
+    ):
+        portfolio.breaker_date = today
+    halted = today is not None and portfolio.breaker_date == today
     for ticker in session.scalars(select(Ticker)).all():
         score, px = scores.get(ticker.id), prices.get(ticker.id)
         if score is None or px is None:
@@ -144,7 +177,7 @@ def advance_portfolio(session: Session, portfolio: Portfolio, now: datetime | No
                 Position.portfolio_id == portfolio.id, Position.ticker_id == ticker.id, Position.status != "closed"
             )
         )
-        if pos is None and score.band in BUY_BANDS and not in_cooldown(session, portfolio.id, ticker.id, data_date):
+        if pos is None and score.band in BUY_BANDS and not halted and not in_cooldown(session, portfolio.id, ticker.id, data_date):
             plan = plan_entry(portfolio.total_value, portfolio.risk_tier, price, cash(session, portfolio))
             if plan:
                 pos = Position(
@@ -154,7 +187,9 @@ def advance_portfolio(session: Session, portfolio: Portfolio, now: datetime | No
                 session.add(pos)
                 session.flush()
         if pos is not None:
-            _step(session, portfolio, pos, score.band, data_date, price, now)
+            _step(session, portfolio, pos, score.band, data_date, price, now, halted)
+    if today is not None:
+        session.merge(EquitySnapshot(portfolio_id=portfolio.id, data_date=today, equity=equity(session, portfolio, prices)))
 
 
 def advance_all(session: Session, now: datetime | None = None) -> None:

@@ -8,12 +8,13 @@ from datetime import date, timedelta
 class Tier:
     risk_per_trade_pct: float
     max_position_pct: float
+    daily_loss_limit_pct: float  # circuit breaker: new buying pauses for the day beyond this fall in equity
 
 
 TIERS = {
-    "conservative": Tier(0.005, 0.03),
-    "moderate": Tier(0.01, 0.06),
-    "aggressive": Tier(0.02, 0.10),
+    "conservative": Tier(0.005, 0.03, 0.01),
+    "moderate": Tier(0.01, 0.06, 0.02),
+    "aggressive": Tier(0.02, 0.10, 0.03),
 }
 
 STOP_PCT = 0.08            # initial stop-loss distance below entry

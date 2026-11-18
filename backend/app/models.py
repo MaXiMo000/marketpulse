@@ -64,6 +64,7 @@ class Portfolio(Base):
     risk_tier: Mapped[str] = mapped_column(String(16))
     mode: Mapped[str] = mapped_column(String(8), default="paper")
     live_ack_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    breaker_date: Mapped[date | None] = mapped_column(default=None)  # data date on which the daily-loss circuit breaker tripped
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
@@ -126,3 +127,13 @@ class BacktestRun(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     result: Mapped[str] = mapped_column(Text)
+
+
+class EquitySnapshot(Base):
+    """Mark-to-market equity of a portfolio at the latest cycle of each data day; the breaker compares against the previous day."""
+
+    __tablename__ = "equity_snapshots"
+
+    portfolio_id: Mapped[int] = mapped_column(ForeignKey("portfolios.id"), primary_key=True)
+    data_date: Mapped[date] = mapped_column(primary_key=True)
+    equity: Mapped[float]
