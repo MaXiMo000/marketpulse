@@ -14,7 +14,7 @@ import ProofLab from './components/ProofLab'
 import Terrain from './components/Terrain'
 import { fetchAlerts, fetchBacktest, fetchPortfolios, fetchPositions, fetchToday, type Portfolio } from './lib/api'
 import { AuthError, clearToken, useToken } from './lib/auth'
-import { usd, utc } from './lib/format'
+import { pnlClass, usd, utc } from './lib/format'
 import { pulsingSymbols } from './lib/hud'
 
 const REFRESH_MS = 60_000
@@ -61,8 +61,13 @@ function Deck({ portfolio }: { portfolio: Portfolio }) {
         <Logo />
         <div className="status">
           WATCHLIST: <b>{rows.length}</b> TICKERS · LAST CYCLE <b>{lastCycle ? utc(lastCycle).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}</b> ·{' '}
-          {portfolio.risk_tier.toUpperCase()} · CASH <b>{usd(portfolio.cash)}</b>
+          {portfolio.risk_tier.toUpperCase()} · CASH <b>{usd(portfolio.cash)}</b> · DAY{' '}
+          <b className={pnlClass(portfolio.day_change)}>{(portfolio.day_change * 100).toFixed(2)}%</b> (BREAKER AT −
+          {(portfolio.daily_loss_limit * 100).toFixed(0)}%)
         </div>
+        {portfolio.breaker_tripped && (
+          <div className="breaker" role="alert">BREAKER TRIPPED: NEW BUYING PAUSED TODAY</div>
+        )}
         <button type="button" className={`mode ${isLive ? 'live' : 'paper'}`} onClick={() => setGateOpen(true)} aria-haspopup="dialog">
           <i aria-hidden="true" />
           {isLive ? 'LIVE — ARMED' : 'PAPER MODE'}

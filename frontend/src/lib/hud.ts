@@ -35,6 +35,7 @@ export function mission(row: TodayRow): { label: string; sub: string } {
   if (row.holding && isBuy(band)) {
     return { label: 'HOLD THE LINE', sub: 'Position open and signal intact. Tranches and stops are running.' }
   }
+  if (isBuy(band) && row.note?.includes('circuit breaker')) return { label: 'BREAKER TRIPPED', sub: row.note }
   if (isBuy(band) && row.note) return { label: 'RECHARGING', sub: row.note }
   if (isSell(band)) return { label: 'STAND DOWN', sub: row.note ?? 'No position to sell.' }
   return { label: 'HOLD STEADY', sub: 'Mid-band. No sized action until the signal flips.' }

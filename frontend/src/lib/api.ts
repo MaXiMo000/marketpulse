@@ -27,6 +27,10 @@ export interface Portfolio {
   mode: string
   live_ack_at: string | null
   cash: number
+  equity: number
+  day_change: number
+  daily_loss_limit: number
+  breaker_tripped: boolean
 }
 
 export interface Plan {

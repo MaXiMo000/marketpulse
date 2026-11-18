@@ -155,3 +155,5 @@ dialog .actions { display: flex; gap: 10px; justify-content: flex-end; }
 .scroll { overflow-x: auto; }
 .btn[aria-pressed='true'] { border-color: var(--cyan); color: var(--cyan); }
 code { background: var(--bg); border: 1px solid var(--line); border-radius: 3px; padding: 1px 6px; font-size: 12px; }
+
+.breaker { font-family: var(--label); font-weight: 700; font-size: 12px; letter-spacing: 1.5px; color: #1a0509; background: var(--sell); padding: 6px 12px; border-radius: 3px; }

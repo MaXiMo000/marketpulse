@@ -87,3 +87,9 @@ test('every briefing states what the backtest has and has not shown', async () =
   assert.match(backtestNote('inverted'), /wrong way/i)
   assert.match(backtestNote('supported'), /limits/i)
 })
+
+test('a tripped circuit breaker is called out as such, not as a cooldown', () => {
+  const r = row({ band: 'Buy', note: 'circuit breaker tripped: new buying is paused for today' })
+  assert.equal(mission(r).label, 'BREAKER TRIPPED')
+  assert.match(mission(r).sub, /paused/)
+})
