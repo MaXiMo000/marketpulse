@@ -26,6 +26,7 @@ phase — see [SPEC.md](SPEC.md) §10.
 - Risk tiers and position sizing: the smaller of a risk-based and a tier-cap size, so the tier cap is a hard limit
 - Entry in three tranches, with stop-loss, take-profit and a trailing stop set when the plan is made
 - Paper ledger: every plan is followed to a realized outcome, wins and losses included
+- A daily-loss circuit breaker that pauses new buying after a bad day
 - Portfolios are always created in paper mode; live mode requires a dated acknowledgement (enforced in the database), and live portfolios are never simulated
 - The Terrain: the watchlist as a 3D skyline (height = score, color = band), with a pulse when a band flips
 - Alerts when a ticker's band changes between cycles, shown in the app and optionally sent by email
@@ -84,6 +85,24 @@ The Proof Lab panel in the app shows it. It reports:
 
 A transparent formula is not a proven edge; this is how you find out whether it has one.
 
+To test candidate factors properly, run the research tool. It ranks stocks by each factor every day, compares them with their
+next-20-day returns, judges each factor on the first 60% of the history and confirms on the untouched rest:
+
+```bash
+.venv/Scripts/python -m app.research            # 30 large caps, 10 years; downloads are cached in .dev/cache
+```
+
+## What the evidence says
+
+On 31 US large caps from 2015 to 2026, the composite score's day-by-day rank correlation with the next 20 days' returns was not
+statistically significant in the period it was judged on, and changed sign in the held-back final 40% of the history. The candidate
+factors tested alongside it (12-1 month momentum, 5- and 21-day reversal, low volatility) did not hold up in both periods either.
+In the 5-year backtest, the strategy performed about the same as holding the same stocks at the same average exposure; its
+measurable difference was lower drawdowns from the stop-loss rules.
+
+Treat MarketPulse as a framework for position sizing, staged entries and pre-set exits, not as a forecast. Both tools are in the
+repository so you can re-run them on your own tickers and periods.
+
 ## Paper trading rules
 
 Each worker cycle, after scoring, every portfolio is advanced:
@@ -94,6 +113,8 @@ Each worker cycle, after scoring, every portfolio is advanced:
 - Exits: stop-loss at −8%; half sold at +20%; a trailing stop that follows the high at 5% once the position is +10%;
   and a full exit if the score falls into the Sell bands.
 - A ticker cannot be re-entered for 5 trading days after an exit.
+- Daily-loss circuit breaker: if equity falls by the tier's limit (1% / 2% / 3%) from the previous close, new buying is paused for
+  that day. Exits keep working.
 - Fills use the latest daily close, with no slippage or fees. Exchange holidays are not modelled.
 
 ## Deploying
