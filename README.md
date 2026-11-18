@@ -29,7 +29,8 @@ phase — see [SPEC.md](SPEC.md) §10.
 - Portfolios are always created in paper mode; live mode requires a dated acknowledgement (enforced in the database), and live portfolios are never simulated
 - The Terrain: the watchlist as a 3D skyline (height = score, color = band), with a pulse when a band flips
 - Alerts when a ticker's band changes between cycles, shown in the app and optionally sent by email
-- REST API with validated input and a CORS allowlist
+- A backtest that checks the score and the paper-trading rules against real history, shown in the app as the Proof Lab
+- REST API with token authentication, validated input, rate limiting and a CORS allowlist
 
 ## Stack
 
@@ -65,6 +66,24 @@ cd backend
 .venv/Scripts/arq app.worker.WorkerSettings   # scheduled: every 30 min in US market hours (needs Redis)
 ```
 
+## Backtesting
+
+```bash
+cd backend
+.venv/Scripts/python -m app.backtest AAPL MSFT NVDA JPM XOM JNJ --years 5 --tier moderate
+```
+
+This downloads daily history (one API call per ticker, so it takes a couple of minutes on the free tier), replays the same
+signal and ledger code the worker uses once per trading day with no access to future data, stores the result, and prints a summary.
+The Proof Lab panel in the app shows it. It reports:
+
+- Forward returns by band, relative to the benchmark, and whether Buy-band days beat Sell-band days beyond chance
+- How well each of the four factors, and the composite, rank-correlates with forward returns
+- The strategy against the benchmark and against the same stocks held at the strategy's own average exposure
+- Trade statistics, and the limits of the test (survivorship bias, same-day fills, no costs)
+
+A transparent formula is not a proven edge; this is how you find out whether it has one.
+
 ## Paper trading rules
 
 Each worker cycle, after scoring, every portfolio is advanced:
@@ -77,10 +96,19 @@ Each worker cycle, after scoring, every portfolio is advanced:
 - A ticker cannot be re-entered for 5 trading days after an exit.
 - Fills use the latest daily close, with no slippage or fees. Exchange holidays are not modelled.
 
+## Deploying
+
+- Set `APP_ENV=production`, a long random `API_TOKEN`, and `CORS_ORIGINS` to the exact frontend origin. Serve the API over HTTPS.
+- Build the frontend with `VITE_API_URL` pointing at the API: the build embeds a Content-Security-Policy that only allows the app's own files and that API origin.
+- Set `X-Frame-Options: DENY` (or `frame-ancestors 'none'`) on the frontend host; a meta tag cannot set it.
+- Run a single API worker: rate limiting is held in process memory.
+
 ## Configuration
 
 | Variable | Where | Purpose |
 |---|---|---|
+| `APP_ENV` | backend | `development` (default) or anything else for production. Production refuses to start without a strong `API_TOKEN` and explicit `CORS_ORIGINS`, and serves no API docs. |
+| `API_TOKEN` | backend | Access token for every `/v1` endpoint (32+ characters outside development). The app asks for it on first load. |
 | `DATABASE_URL` | backend | SQLAlchemy URL. Defaults to a local SQLite file; use Postgres in production. |
 | `REDIS_URL` | backend | Redis for the Arq scheduler. |
 | `TWELVEDATA_API_KEY` | backend | Twelve Data API key (free tier is enough). |
@@ -103,6 +131,7 @@ Each worker cycle, after scoring, every portfolio is advanced:
 | `POST /v1/portfolios/{id}/live-ack` | Record the dated acknowledgement (`{"acknowledge": true}`) and switch to live mode. |
 | `POST /v1/portfolios/{id}/paper` | Return to paper mode and clear the acknowledgement. |
 | `GET /v1/alerts?limit=50` | Recent band flips, newest first. |
+| `GET /v1/backtest` | The latest stored backtest result. |
 | `GET /health` | Liveness check. |
 
 Interactive docs are served at `/docs`.
