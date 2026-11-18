@@ -19,3 +19,12 @@ dist-ssr/
 
 # OS
 .DS_Store
+
+# Local-only: internal notes and assistant files
+.dev/
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+
+# Local data
+*.db
