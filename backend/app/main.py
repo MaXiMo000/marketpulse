@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import portfolios, tickers
+from app.routers import alerts, portfolios, tickers
 
 app = FastAPI(title="MarketPulse")
 app.add_middleware(
@@ -13,6 +13,7 @@ app.add_middleware(
 )
 app.include_router(tickers.router)
 app.include_router(portfolios.router)
+app.include_router(alerts.router)
 
 
 @app.get("/health")

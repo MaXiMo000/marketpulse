@@ -83,3 +83,34 @@ def test_market_hours_respects_new_york_dst(when, expected):
     from app.worker import is_market_hours
 
     assert is_market_hours(when) is expected
+
+
+def _prior_score(session, band, composite, at):
+    from app.models import CompositeScore
+
+    ticker = session.scalar(select(Ticker).where(Ticker.symbol == "AAA"))
+    session.add(CompositeScore(ticker_id=ticker.id, computed_at=at, trend=0, reversion=0, rel_strength=0,
+                               vol_penalty=0, composite=composite, band=band))
+    session.commit()
+
+
+def test_band_change_between_cycles_records_an_alert(session):
+    from app.models import Alert
+
+    _prior_score(session, "Strong Sell", 15, T0 - timedelta(minutes=30))
+    run_cycle(session, fetch_ok, now=T0)
+    [alert] = session.scalars(select(Alert)).all()
+    new_score = session.scalar(
+        select(CompositeScore).join(Ticker).where(Ticker.symbol == "AAA").order_by(CompositeScore.computed_at.desc())
+    )
+    assert (alert.from_band, alert.from_score) == ("Strong Sell", 15)
+    assert (alert.to_band, alert.to_score) == (new_score.band, new_score.composite)
+    assert alert.computed_at.replace(tzinfo=timezone.utc) == T0
+
+
+def test_no_alert_on_first_score_or_when_band_is_unchanged(session):
+    from app.models import Alert
+
+    run_cycle(session, fetch_ok, now=T0)                           # first ever score: nothing to compare with
+    run_cycle(session, fetch_ok, now=T0 + timedelta(minutes=30))   # same data, same band
+    assert session.scalars(select(Alert)).all() == []

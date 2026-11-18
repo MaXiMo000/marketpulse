@@ -130,3 +130,48 @@ def test_positions_list_shows_realized_outcome_fills_and_the_miss_rate(env):
     assert by_symbol["WIN"]["realized_pnl"] == pytest.approx(200)
     assert [f["side"] for f in by_symbol["WIN"]["fills"]] == ["buy", "sell"]
     assert body["summary"] == {"open": 0, "closed": 2, "wins": 1, "losses": 1, "realized_pnl": pytest.approx(20)}
+
+
+@pytest.mark.parametrize("body", [{}, {"acknowledge": False}, {"acknowledge": "yes"}, {"acknowledge": True, "mode": "x"}])
+def test_live_ack_requires_an_explicit_true(env, body):
+    client, _ = env
+    pid = make_portfolio(client)
+    assert client.post(f"/v1/portfolios/{pid}/live-ack", json=body).status_code == 422
+    assert client.get(f"/v1/portfolios/{pid}").json()["mode"] == "paper"
+
+
+def test_live_ack_switches_to_live_with_a_date_and_is_idempotent(env):
+    client, _ = env
+    pid = make_portfolio(client)
+    first = client.post(f"/v1/portfolios/{pid}/live-ack", json={"acknowledge": True}).json()
+    assert first["mode"] == "live" and first["live_ack_at"] is not None
+    again = client.post(f"/v1/portfolios/{pid}/live-ack", json={"acknowledge": True}).json()
+    assert again["live_ack_at"] == first["live_ack_at"]
+    assert client.post("/v1/portfolios/99/live-ack", json={"acknowledge": True}).status_code == 404
+
+
+def test_back_to_paper_clears_the_acknowledgement(env):
+    client, _ = env
+    pid = make_portfolio(client)
+    client.post(f"/v1/portfolios/{pid}/live-ack", json={"acknowledge": True})
+    back = client.post(f"/v1/portfolios/{pid}/paper").json()
+    assert back["mode"] == "paper" and back["live_ack_at"] is None
+    # going live again needs a fresh acknowledgement
+    assert client.post(f"/v1/portfolios/{pid}/live-ack", json={"acknowledge": True}).json()["mode"] == "live"
+
+
+def test_paper_simulation_never_touches_a_live_portfolio(env):
+    client, engine = env
+    paper_id = make_portfolio(client)
+    live_id = make_portfolio(client)
+    client.post(f"/v1/portfolios/{live_id}/live-ack", json={"acknowledge": True})
+    with Session(engine) as s:
+        t = add_ticker(s, "AAA")
+        market(s, t, MON, "Buy", 100)
+        advance_all(s)
+
+    assert len(client.get(f"/v1/portfolios/{paper_id}/positions").json()["positions"]) == 1
+    assert client.get(f"/v1/portfolios/{live_id}/positions").json()["positions"] == []
+    # the live portfolio still gets today's sized plan to act on
+    [row] = client.get(f"/v1/portfolios/{live_id}/today").json()
+    assert row["plan"]["kind"] == "entry"

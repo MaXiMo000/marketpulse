@@ -18,7 +18,8 @@ from app.config import settings
 from app.db import SessionLocal
 from app.indicators import MIN_CLOSES, compute, ret
 from app.ledger import advance_all
-from app.models import CompositeScore, PriceSnapshot, Ticker
+from app.models import Alert, CompositeScore, PriceSnapshot, Ticker
+from app.notify import notify_flips
 from app.scoring import score
 
 log = logging.getLogger(__name__)
@@ -57,6 +58,14 @@ def run_cycle(session: Session, fetch, now: datetime | None = None) -> dict:
                 ticker_id=ticker.id, observed_at=dates[i], close=closes[i],
                 ma20=si.ma20, ma100=si.ma100, rsi14=si.rsi14, ret_20d=si.ret_20d, ann_vol=si.ann_vol_pct,
             ))
+        previous = session.scalar(
+            select(CompositeScore).where(CompositeScore.ticker_id == ticker.id).order_by(CompositeScore.computed_at.desc())
+        )
+        if previous is not None and previous.band != s.band:
+            session.add(Alert(
+                ticker_id=ticker.id, computed_at=now, from_band=previous.band, to_band=s.band,
+                from_score=previous.composite, to_score=s.composite,
+            ))
         session.add(CompositeScore(
             ticker_id=ticker.id, computed_at=now, trend=s.trend, reversion=s.reversion,
             rel_strength=s.rel_strength, vol_penalty=s.vol_penalty, composite=s.composite, band=s.band,
@@ -74,8 +83,10 @@ def is_market_hours(now: datetime) -> bool:
 
 def _run_once() -> dict:
     with SessionLocal() as session:
-        result = run_cycle(session, fetch_daily_closes)
+        now = datetime.now(timezone.utc)
+        result = run_cycle(session, fetch_daily_closes, now=now)
         advance_all(session)
+        notify_flips(session, now)
         return result
 
 

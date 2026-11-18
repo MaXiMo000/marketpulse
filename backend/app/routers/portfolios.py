@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -6,7 +8,7 @@ from app.db import get_db
 from app.ledger import BUY_BANDS, SELL_BANDS, cash, fills_for, in_cooldown, latest_prices, latest_scores, position_stats
 from app.models import Portfolio, Position, Ticker
 from app.schemas import (
-    FillOut, HoldingOut, PlanOut, PortfolioIn, PortfolioOut, PositionOut, PositionsOut,
+    FillOut, HoldingOut, LiveAck, PlanOut, PortfolioIn, PortfolioOut, PositionOut, PositionsOut,
     ScoreOut, Summary, TodayRow, TrancheOut,
 )
 from app.sizing import plan_entry
@@ -42,6 +44,24 @@ def list_portfolios(db: Session = Depends(get_db)):
 @router.get("/{portfolio_id}", response_model=PortfolioOut)
 def get_portfolio(portfolio_id: int, db: Session = Depends(get_db)):
     return _out(db, _portfolio(db, portfolio_id))
+
+
+@router.post("/{portfolio_id}/live-ack", response_model=PortfolioOut)
+def live_ack(portfolio_id: int, _: LiveAck, db: Session = Depends(get_db)):
+    pf = _portfolio(db, portfolio_id)
+    if pf.live_ack_at is None:
+        pf.live_ack_at = datetime.now(timezone.utc)
+    pf.mode = "live"
+    db.commit()
+    return _out(db, pf)
+
+
+@router.post("/{portfolio_id}/paper", response_model=PortfolioOut)
+def back_to_paper(portfolio_id: int, db: Session = Depends(get_db)):
+    pf = _portfolio(db, portfolio_id)
+    pf.mode, pf.live_ack_at = "paper", None  # a later switch to live needs a fresh acknowledgement
+    db.commit()
+    return _out(db, pf)
 
 
 @router.get("/{portfolio_id}/today", response_model=list[TodayRow])

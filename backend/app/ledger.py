@@ -158,6 +158,7 @@ def advance_portfolio(session: Session, portfolio: Portfolio, now: datetime | No
 
 
 def advance_all(session: Session, now: datetime | None = None) -> None:
-    for portfolio in session.scalars(select(Portfolio)).all():
+    # Only paper portfolios are simulated; a live portfolio must never get invented fills.
+    for portfolio in session.scalars(select(Portfolio).where(Portfolio.mode == "paper")).all():
         advance_portfolio(session, portfolio, now)
     session.commit()

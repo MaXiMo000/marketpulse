@@ -54,6 +54,12 @@ class PortfolioIn(BaseModel):
     risk_tier: Literal["conservative", "moderate", "aggressive"]
 
 
+class LiveAck(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    acknowledge: Literal[True]  # must be the literal true: the user accepts the disclosure shown in the app
+
+
 class PortfolioOut(BaseModel):
     id: int
     total_value: float
@@ -136,3 +142,13 @@ class Summary(BaseModel):
 class PositionsOut(BaseModel):
     summary: Summary
     positions: list[PositionOut]
+
+
+class AlertOut(BaseModel):
+    symbol: str
+    computed_at: datetime
+    from_band: str
+    to_band: str
+    from_score: float
+    to_score: float
+    direction: Literal["up", "down"]

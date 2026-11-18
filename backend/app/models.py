@@ -101,3 +101,18 @@ class Fill(Base):
     data_date: Mapped[date]
     reason: Mapped[str] = mapped_column(String(16))
     filled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class Alert(Base):
+    """A ticker's band changed between two consecutive cycles. Written by the worker, read by the UI."""
+
+    __tablename__ = "alerts"
+    __table_args__ = (UniqueConstraint("ticker_id", "computed_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ticker_id: Mapped[int] = mapped_column(ForeignKey("tickers.id"), index=True)
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))  # the cycle that flipped the band
+    from_band: Mapped[str] = mapped_column(String(16))
+    to_band: Mapped[str] = mapped_column(String(16))
+    from_score: Mapped[float]
+    to_score: Mapped[float]
