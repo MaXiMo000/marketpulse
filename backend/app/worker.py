@@ -17,6 +17,7 @@ from app.clients.twelvedata import fetch_daily_closes
 from app.config import settings
 from app.db import SessionLocal
 from app.indicators import MIN_CLOSES, compute, ret
+from app.ledger import advance_all
 from app.models import CompositeScore, PriceSnapshot, Ticker
 from app.scoring import score
 
@@ -73,7 +74,9 @@ def is_market_hours(now: datetime) -> bool:
 
 def _run_once() -> dict:
     with SessionLocal() as session:
-        return run_cycle(session, fetch_daily_closes)
+        result = run_cycle(session, fetch_daily_closes)
+        advance_all(session)
+        return result
 
 
 async def signal_cycle(ctx) -> str | dict:

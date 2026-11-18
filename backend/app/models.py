@@ -1,7 +1,7 @@
-"""Phase 0 subset of SPEC.md §7.6: tickers, daily price snapshots, composite scores."""
-from datetime import date, datetime
+"""SPEC.md §7.6 data model. Positions hold the plan; shares and entry price are derived from fills."""
+from datetime import date, datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -47,3 +47,57 @@ class CompositeScore(Base):
     vol_penalty: Mapped[float]
     composite: Mapped[float]
     band: Mapped[str] = mapped_column(String(16))
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class Portfolio(Base):
+    __tablename__ = "portfolios"
+    __table_args__ = (
+        CheckConstraint("mode = 'paper' OR live_ack_at IS NOT NULL", name="live_requires_ack"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    total_value: Mapped[float]
+    risk_tier: Mapped[str] = mapped_column(String(16))
+    mode: Mapped[str] = mapped_column(String(8), default="paper")
+    live_ack_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class Position(Base):
+    """status: 'planned' (no tranche filled yet) | 'open' | 'closed'. At most one active position per ticker per portfolio."""
+
+    __tablename__ = "positions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    portfolio_id: Mapped[int] = mapped_column(ForeignKey("portfolios.id"), index=True)
+    ticker_id: Mapped[int] = mapped_column(ForeignKey("tickers.id"))
+    status: Mapped[str] = mapped_column(String(8), default="planned")
+    plan_date: Mapped[date]  # data date of the close the plan was sized on; tranche due dates count from here
+    planned_shares: Mapped[int]  # total sized quantity; never changes after the plan is made
+    stop: Mapped[float]
+    target: Mapped[float]
+    high_water: Mapped[float]
+    trimmed: Mapped[bool] = mapped_column(default=False)
+    plan_cancelled: Mapped[bool] = mapped_column(default=False)  # no further tranches will be bought
+    close_reason: Mapped[str | None] = mapped_column(String(16), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class Fill(Base):
+    """One buy or sell at a price. `reason`: tranche | stop | target | signal | cancelled."""
+
+    __tablename__ = "fills"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    position_id: Mapped[int] = mapped_column(ForeignKey("positions.id"), index=True)
+    side: Mapped[str] = mapped_column(String(4))
+    shares: Mapped[int]
+    price: Mapped[float]
+    data_date: Mapped[date]
+    reason: Mapped[str] = mapped_column(String(16))
+    filled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
