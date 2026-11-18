@@ -41,8 +41,18 @@ auth_failures = RateLimiter(limit=10, window_s=60)
 requests = RateLimiter(limit=300, window_s=60)
 
 
-def _ip(request: Request) -> str:
-    return request.client.host if request.client else "unknown"
+def client_ip(request: Request) -> str:
+    """The caller's address, for rate limiting.
+
+    X-Forwarded-For is only believed for the `proxy_hops` entries our own proxies appended (counted from the right);
+    anything further left was written by the client and could be forged to dodge the limits.
+    """
+    peer = request.client.host if request.client else "unknown"
+    hops = settings.proxy_hops
+    if hops <= 0:
+        return peer
+    entries = [e.strip() for e in request.headers.get("x-forwarded-for", "").split(",") if e.strip()]
+    return entries[-hops] if len(entries) >= hops else peer
 
 
 def _too_many(wait: float) -> HTTPException:
@@ -50,7 +60,7 @@ def _too_many(wait: float) -> HTTPException:
 
 
 def limit_requests(request: Request) -> None:
-    ip = _ip(request)
+    ip = client_ip(request)
     if (wait := requests.retry_after(ip)) is not None:
         raise _too_many(wait)
     requests.record(ip)
@@ -60,7 +70,7 @@ def require_auth(request: Request) -> None:
     """Bearer token, compared in constant time. Repeated failures lock the client out for a minute."""
     if not settings.api_token:  # only reachable in development; validate_settings forbids this elsewhere
         return
-    ip = _ip(request)
+    ip = client_ip(request)
     if (wait := auth_failures.retry_after(ip)) is not None:
         raise _too_many(wait)
     scheme, _, token = request.headers.get("authorization", "").partition(" ")
@@ -73,10 +83,17 @@ def require_auth(request: Request) -> None:
 PROTECTED = [Depends(limit_requests), Depends(require_auth)]
 
 
+def validate_database(s: Settings) -> None:
+    """Outside development a local SQLite file is refused: hosts wipe it on restart, silently losing the ledger."""
+    if s.app_env != "development" and s.database_url.startswith("sqlite"):
+        raise RuntimeError("DATABASE_URL must point at a persistent database (for example Postgres) when APP_ENV is not 'development'")
+
+
 def validate_settings(s: Settings) -> None:
-    """Refuses to start outside development with a missing or weak token or a wildcard CORS policy."""
+    """Refuses to start outside development with a missing or weak token, a wildcard CORS policy or a throwaway database."""
     if s.app_env == "development":
         return
+    validate_database(s)
     if len(s.api_token) < MIN_TOKEN_LENGTH:
         raise RuntimeError(f"API_TOKEN must be at least {MIN_TOKEN_LENGTH} characters when APP_ENV is not 'development'")
     origins = [o.strip() for o in s.cors_origins.split(",") if o.strip()]

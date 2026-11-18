@@ -11,9 +11,10 @@ from app.config import settings
 from app.db import get_db
 from app.main import create_app
 from app.models import Base
-from app.security import RateLimiter, validate_settings
+from app.security import RateLimiter, validate_database, validate_settings
 
 TOKEN = "t" * 40
+PG = "postgresql+psycopg://u:p@h/d"
 
 
 class Clock:
@@ -42,6 +43,7 @@ def secured(monkeypatch):
     monkeypatch.setattr(settings, "app_env", "production")
     monkeypatch.setattr(settings, "api_token", TOKEN)
     monkeypatch.setattr(settings, "cors_origins", "https://app.example.test")
+    monkeypatch.setattr(settings, "database_url", PG)
     monkeypatch.setattr(security, "auth_failures", RateLimiter(5, 60))
     monkeypatch.setattr(security, "requests", RateLimiter(1000, 60))
     return TestClient(memory_db(create_app()))
@@ -134,20 +136,22 @@ def test_general_request_limit(monkeypatch, secured):
 # ---------- startup configuration ----------
 
 @pytest.mark.parametrize(
-    "env,token,cors,ok",
+    "env,token,cors,db,ok",
     [
-        ("development", "", "http://localhost:5173", True),
-        ("production", TOKEN, "https://app.example.test", True),
-        ("production", "", "https://app.example.test", False),        # no token
-        ("production", "short", "https://app.example.test", False),    # weak token
-        ("production", TOKEN, "*", False),                             # wildcard CORS
-        ("production", TOKEN, "https://a.test, *", False),
+        ("development", "", "http://localhost:5173", "sqlite:///./x.db", True),
+        ("production", TOKEN, "https://app.example.test", PG, True),
+        ("production", "", "https://app.example.test", PG, False),            # no token
+        ("production", "short", "https://app.example.test", PG, False),        # weak token
+        ("production", TOKEN, "*", PG, False),                                 # wildcard CORS
+        ("production", TOKEN, "https://a.test, *", PG, False),
+        ("production", TOKEN, "https://app.example.test", "sqlite:///./x.db", False),   # data would vanish on restart
     ],
 )
-def test_production_config_fails_closed(monkeypatch, env, token, cors, ok):
+def test_production_config_fails_closed(monkeypatch, env, token, cors, db, ok):
     monkeypatch.setattr(settings, "app_env", env)
     monkeypatch.setattr(settings, "api_token", token)
     monkeypatch.setattr(settings, "cors_origins", cors)
+    monkeypatch.setattr(settings, "database_url", db)
     if ok:
         validate_settings(settings)
     else:
@@ -155,8 +159,19 @@ def test_production_config_fails_closed(monkeypatch, env, token, cors, ok):
             validate_settings(settings)
 
 
+def test_the_worker_needs_a_persistent_database_but_not_an_api_token(monkeypatch):
+    monkeypatch.setattr(settings, "app_env", "production")
+    monkeypatch.setattr(settings, "api_token", "")
+    monkeypatch.setattr(settings, "database_url", PG)
+    validate_database(settings)                      # fine: no token needed to run a cycle
+    monkeypatch.setattr(settings, "database_url", "sqlite:///./x.db")
+    with pytest.raises(RuntimeError, match="DATABASE_URL"):
+        validate_database(settings)
+
+
 def test_the_app_refuses_to_start_misconfigured_in_production(monkeypatch):
     monkeypatch.setattr(settings, "app_env", "production")
+    monkeypatch.setattr(settings, "database_url", PG)
     monkeypatch.setattr(settings, "api_token", "")
     with pytest.raises(RuntimeError):
         create_app()

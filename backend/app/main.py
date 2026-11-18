@@ -1,8 +1,11 @@
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.db import get_db
 from app.routers import alerts, backtest, portfolios, tickers
 from app.security import validate_settings
 
@@ -51,7 +54,11 @@ def create_app() -> FastAPI:
     app.include_router(backtest.router)
 
     @app.get("/health")
-    def health():
+    def health(db: Session = Depends(get_db)):
+        try:
+            db.execute(text("SELECT 1"))
+        except Exception:
+            raise HTTPException(503, "database unavailable")  # no internal detail for an unauthenticated caller
         return {"status": "ok"}
 
     return app

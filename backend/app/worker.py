@@ -1,25 +1,24 @@
 """Signal cycle: fetch daily closes, compute indicators and the composite score, store both.
 
-Run one cycle by hand:   python -m app.worker
-Run on a schedule:       arq app.worker.WorkerSettings   (needs Redis)
+Run one cycle by hand:        python -m app.worker
+Run from a scheduler (cron):  python -m app.worker --scheduled     (does nothing outside US market hours)
 """
-import asyncio
+import argparse
 import logging
 from datetime import datetime, time, timezone
 from zoneinfo import ZoneInfo
 
-from arq import cron
-from arq.connections import RedisSettings
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.clients.twelvedata import fetch_daily_closes
-from app.config import settings
 from app.db import SessionLocal
 from app.indicators import MIN_CLOSES, compute
 from app.ledger import advance_all
 from app.models import Alert, CompositeScore, PriceSnapshot, Ticker
+from app.config import settings
 from app.notify import notify_flips
+from app.security import validate_database
 from app.signal import evaluate
 
 log = logging.getLogger(__name__)
@@ -88,18 +87,30 @@ def _run_once() -> dict:
         return result
 
 
-async def signal_cycle(ctx) -> str | dict:
-    if not is_market_hours(datetime.now(timezone.utc)):
-        return "skipped: market closed"
-    return await asyncio.to_thread(_run_once)
-
-
-class WorkerSettings:
-    functions = [signal_cycle]
-    cron_jobs = [cron(signal_cycle, minute={0, 30}, run_at_startup=True)]
-    redis_settings = RedisSettings.from_dsn(settings.redis_url)
+def main(argv: list[str] | None = None, now: datetime | None = None, run=_run_once) -> int:
+    """Exit status 0 on a clean cycle; 1 if it crashed or any ticker failed, so the scheduler flags the run."""
+    parser = argparse.ArgumentParser(description="Run one signal cycle.")
+    parser.add_argument("--scheduled", action="store_true", help="run only during US market hours (for cron)")
+    args = parser.parse_args(argv)
+    try:
+        validate_database(settings)
+    except RuntimeError as exc:
+        print(f"refusing to run: {exc}")
+        return 1
+    if args.scheduled and not is_market_hours(now or datetime.now(timezone.utc)):
+        print("skipped: market closed")
+        return 0
+    try:
+        result = run()
+    except Exception as exc:
+        log.exception("cycle crashed")
+        print(f"cycle failed: {exc}")
+        return 1
+    print(result)
+    return 1 if result["failed"] else 0
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    print(_run_once())
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    raise SystemExit(main())
