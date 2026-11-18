@@ -119,3 +119,29 @@ export const addTicker = (symbol: string) =>
 
 export const createPortfolio = (total_value: number, risk_tier: RiskTier) =>
   postJson<Portfolio>('/v1/portfolios', { total_value, risk_tier }, 'could not create portfolio')
+
+export interface Alert {
+  symbol: string
+  computed_at: string
+  from_band: string
+  to_band: string
+  from_score: number
+  to_score: number
+  direction: 'up' | 'down'
+}
+
+export interface HistoryPoint {
+  date: string
+  close: number
+  ma20: number
+  ma100: number
+}
+
+export const fetchAlerts = () => getJson<Alert[]>('/v1/alerts?limit=20')
+export const fetchHistory = (symbol: string) =>
+  getJson<{ symbol: string; points: HistoryPoint[] }>(`/v1/tickers/${encodeURIComponent(symbol)}/history?days=60`)
+
+export const acknowledgeLive = (id: number) =>
+  postJson<Portfolio>(`/v1/portfolios/${id}/live-ack`, { acknowledge: true }, 'could not enable live mode')
+export const backToPaper = (id: number) =>
+  postJson<Portfolio>(`/v1/portfolios/${id}/paper`, {}, 'could not switch to paper mode')

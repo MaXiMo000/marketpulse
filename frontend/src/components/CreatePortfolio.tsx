@@ -23,8 +23,7 @@ export default function CreatePortfolio() {
   }
 
   return (
-    <form onSubmit={onSubmit} className="panel">
-      <strong>Create a paper portfolio</strong>
+    <form onSubmit={onSubmit}>
       <label>
         Capital (USD)
         <input type="number" min="1" step="any" required value={value} onChange={(e) => setValue(e.target.value)} />
@@ -37,8 +36,10 @@ export default function CreatePortfolio() {
           ))}
         </select>
       </label>
-      <button type="submit" disabled={create.isPending}>Create</button>
-      {create.isError && <span role="alert" className="error">{create.error.message}</span>}
+      <div className="inline">
+        <button type="submit" className="btn" disabled={create.isPending}>Create paper portfolio</button>
+        {create.isError && <span role="alert" className="error">{create.error.message}</span>}
+      </div>
     </form>
   )
 }
