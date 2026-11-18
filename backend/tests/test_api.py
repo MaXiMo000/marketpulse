@@ -1,33 +1,13 @@
 from datetime import date, datetime, timedelta, timezone
 
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
-from sqlalchemy.pool import StaticPool
 
-from app.db import get_db
-from app.main import app
-from app.models import Base
 from app.worker import SNAPSHOT_DAYS, run_cycle
 
 START = date(2025, 1, 1)
 UPTREND = [(START + timedelta(days=i), 100 + i * 0.5) for i in range(170)]
 FLAT = [(START + timedelta(days=i), 100.0) for i in range(170)]
-
-
-@pytest.fixture
-def env():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    Base.metadata.create_all(engine)
-
-    def override():
-        with Session(engine) as s:
-            yield s
-
-    app.dependency_overrides[get_db] = override
-    yield TestClient(app), engine
-    app.dependency_overrides.clear()
 
 
 def test_add_ticker_normalizes_and_rejects_duplicates(env):

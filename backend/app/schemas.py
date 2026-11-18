@@ -1,6 +1,7 @@
 from datetime import date, datetime
+from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 SYMBOL_PATTERN = r"^[A-Z0-9.\-]{1,16}$"
 
@@ -44,3 +45,94 @@ class HistoryPoint(BaseModel):
 class History(BaseModel):
     symbol: str
     points: list[HistoryPoint]
+
+
+class PortfolioIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # `mode` is not settable: every portfolio starts in paper
+
+    total_value: float = Field(gt=0, le=1e9)
+    risk_tier: Literal["conservative", "moderate", "aggressive"]
+
+
+class PortfolioOut(BaseModel):
+    id: int
+    total_value: float
+    risk_tier: str
+    mode: str
+    live_ack_at: datetime | None
+    cash: float
+
+
+class TrancheOut(BaseModel):
+    label: str
+    offset_days: int
+    shares: int
+
+
+class PlanOut(BaseModel):
+    kind: Literal["entry", "exit"]
+    shares: int
+    price: float
+    notional: float
+    stop: float | None = None
+    target: float | None = None
+    risk_amount: float | None = None
+    binding: str | None = None  # which limit set the size: tier | risk | cash
+    tranches: list[TrancheOut] = []
+
+
+class HoldingOut(BaseModel):
+    shares: int
+    avg_entry: float
+    unrealized_pnl: float
+    stop: float
+    target: float
+
+
+class TodayRow(BaseModel):
+    symbol: str
+    score: ScoreOut | None
+    price: float | None
+    price_date: date | None
+    holding: HoldingOut | None
+    plan: PlanOut | None
+    note: str | None
+
+
+class FillOut(BaseModel):
+    side: str
+    shares: int
+    price: float
+    data_date: date
+    reason: str
+
+
+class PositionOut(BaseModel):
+    id: int
+    symbol: str
+    status: str
+    plan_date: date
+    planned_shares: int
+    shares: int
+    avg_entry: float
+    stop: float
+    target: float
+    trimmed: bool
+    plan_cancelled: bool
+    close_reason: str | None
+    realized_pnl: float
+    unrealized_pnl: float | None
+    fills: list[FillOut]
+
+
+class Summary(BaseModel):
+    open: int
+    closed: int
+    wins: int
+    losses: int
+    realized_pnl: float
+
+
+class PositionsOut(BaseModel):
+    summary: Summary
+    positions: list[PositionOut]

@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import tickers
+from app.routers import portfolios, tickers
 
 app = FastAPI(title="MarketPulse")
 app.add_middleware(
@@ -12,6 +12,7 @@ app.add_middleware(
     allow_headers=["Content-Type"],
 )
 app.include_router(tickers.router)
+app.include_router(portfolios.router)
 
 
 @app.get("/health")
