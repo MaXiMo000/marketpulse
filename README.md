@@ -14,8 +14,8 @@ entry/exit plan, every number traceable to a named, visible formula. No
 Phases 0–2: a worker scores a watchlist; each portfolio sizes a plan from the score
 and risk tier and tracks it in a paper ledger through to a realized outcome. The app
 shows the watchlist as a 3D skyline, raises an alert when a ticker's band changes, and
-gates live mode behind a dated acknowledgement. Broker execution comes in a later
-phase — see [SPEC.md](SPEC.md) §10.
+gates live mode behind a dated acknowledgement. It deploys to Render from the included
+Blueprint. Broker execution is not implemented — see [SPEC.md](SPEC.md) §10.
 
 ## Features
 
@@ -35,7 +35,7 @@ phase — see [SPEC.md](SPEC.md) §10.
 
 ## Stack
 
-- **Backend:** FastAPI, Arq worker, SQLAlchemy 2.0 + Alembic, httpx
+- **Backend:** FastAPI, SQLAlchemy 2.0 + Alembic, httpx; SQLite for local use, Postgres in production
 - **Data:** [Twelve Data](https://twelvedata.com) daily time series (free tier)
 - **Frontend:** React + Vite + TypeScript, TanStack Query, React Three Fiber (lazy-loaded)
 
@@ -63,9 +63,12 @@ Open http://localhost:5173, add a ticker, then run a signal cycle:
 
 ```bash
 cd backend
-.venv/Scripts/python -m app.worker        # one cycle now, any time of day
-.venv/Scripts/arq app.worker.WorkerSettings   # scheduled: every 30 min in US market hours (needs Redis)
+.venv/Scripts/python -m app.worker               # one cycle now, any time of day
+.venv/Scripts/python -m app.worker --scheduled   # same, but does nothing outside US market hours (for a scheduler)
 ```
+
+The worker is a one-shot command: run it every 30 minutes from cron, a Render cron job, or any scheduler. It exits non-zero if
+the cycle crashed or any ticker failed, so a scheduler can flag the run.
 
 ## Backtesting
 
@@ -117,12 +120,36 @@ Each worker cycle, after scoring, every portfolio is advanced:
   that day. Exits keep working.
 - Fills use the latest daily close, with no slippage or fees. Exchange holidays are not modelled.
 
-## Deploying
+## Deploying on Render
 
-- Set `APP_ENV=production`, a long random `API_TOKEN`, and `CORS_ORIGINS` to the exact frontend origin. Serve the API over HTTPS.
-- Build the frontend with `VITE_API_URL` pointing at the API: the build embeds a Content-Security-Policy that only allows the app's own files and that API origin.
-- Set `X-Frame-Options: DENY` (or `frame-ancestors 'none'`) on the frontend host; a meta tag cannot set it.
-- Run a single API worker: rate limiting is held in process memory.
+`render.yaml` is a Blueprint for the whole app:
+
+| Service | Type | What it does |
+|---|---|---|
+| `marketpulse-api` | Web service (free plan) | The API. Runs migrations on start. Sleeps after 15 idle minutes and takes about a minute to wake. |
+| `marketpulse-cycle` | Cron job | Runs `python -m app.worker --scheduled` every 30 minutes during US market hours. |
+| `marketpulse-app` | Static site | The frontend, built with a Content-Security-Policy that allows only itself and the API. |
+| `marketpulse-db` | Postgres | Paid plan: Render deletes free Postgres databases 30 days after creation, which would destroy the ledger. |
+
+Render's plans and prices change; check the dashboard before creating the Blueprint. The cron job and the database are paid.
+
+1. Push this repository to GitHub. In Render choose **New > Blueprint** and select it. Enter your `TWELVEDATA_API_KEY` when prompted.
+2. Wait for the first deploy. If Render assigned URLs other than `marketpulse-api.onrender.com` and `marketpulse-app.onrender.com`
+   (names are global), rename the services in `render.yaml` and update `CORS_ORIGINS` (API) and `VITE_API_URL` (static site) to match.
+3. Open `marketpulse-api` > **Environment** and copy the generated `API_TOKEN`. Open the app URL and paste it when asked.
+4. Create a paper portfolio and add tickers. Scores appear at the next cron run, or trigger one from the cron job's page.
+5. Pushes to `main` redeploy automatically once CI passes.
+
+Optional:
+
+- **Email alerts:** add `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `ALERT_EMAIL_FROM` and `ALERT_EMAIL_TO` to the cron job
+  (the job sends them). Use an SMTP provider on port 587; Render blocks outbound port 25.
+- **A backtest in the hosted app:** the database accepts internal connections only. Temporarily add your IP under the database's
+  access settings, then run `DATABASE_URL=<external connection string> python -m app.backtest AAPL MSFT NVDA` from `backend/`.
+- **Rotating secrets:** change `API_TOKEN` or `TWELVEDATA_API_KEY` in the dashboard and redeploy; sign in again with the new token.
+
+Production refuses to start without a strong `API_TOKEN`, explicit `CORS_ORIGINS` and a non-SQLite `DATABASE_URL`. Keep the API at a
+single instance: rate limiting is held in process memory. `PROXY_HOPS=1` makes it use the client address Render's proxy recorded.
 
 ## Configuration
 
@@ -130,8 +157,8 @@ Each worker cycle, after scoring, every portfolio is advanced:
 |---|---|---|
 | `APP_ENV` | backend | `development` (default) or anything else for production. Production refuses to start without a strong `API_TOKEN` and explicit `CORS_ORIGINS`, and serves no API docs. |
 | `API_TOKEN` | backend | Access token for every `/v1` endpoint (32+ characters outside development). The app asks for it on first load. |
-| `DATABASE_URL` | backend | SQLAlchemy URL. Defaults to a local SQLite file; use Postgres in production. |
-| `REDIS_URL` | backend | Redis for the Arq scheduler. |
+| `DATABASE_URL` | backend | Database URL. Defaults to a local SQLite file, which production refuses; `postgres://` and `postgresql://` URLs from a host work as given. |
+| `PROXY_HOPS` | backend | Trusted reverse proxies in front of the API (default 0, which ignores `X-Forwarded-For`; use 1 on Render). |
 | `TWELVEDATA_API_KEY` | backend | Twelve Data API key (free tier is enough). |
 | `CORS_ORIGINS` | backend | Comma-separated origins allowed to call the API. |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` | backend | Optional SMTP server for flip emails (STARTTLS). Email is off while `SMTP_HOST` is empty. |
@@ -153,7 +180,7 @@ Each worker cycle, after scoring, every portfolio is advanced:
 | `POST /v1/portfolios/{id}/paper` | Return to paper mode and clear the acknowledgement. |
 | `GET /v1/alerts?limit=50` | Recent band flips, newest first. |
 | `GET /v1/backtest` | The latest stored backtest result. |
-| `GET /health` | Liveness check. |
+| `GET /health` | Liveness and database check (no authentication). |
 
 Interactive docs are served at `/docs`.
 
@@ -163,6 +190,11 @@ Interactive docs are served at `/docs`.
 cd backend && .venv/Scripts/python -m pytest
 cd frontend && npm run lint && npm test && npm run build
 ```
+
+Four extra tests run every migration up and down and exercise a cycle, the ledger and the API on a real Postgres. They are skipped
+unless you point `TEST_DATABASE_URL` at an empty database, for example
+`TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/marketpulse_test`. CI runs them on every push and also validates
+`render.yaml` against Render's schema.
 
 ## License
 

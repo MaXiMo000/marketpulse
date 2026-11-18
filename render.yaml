@@ -1,0 +1,95 @@
+# Render Blueprint: API, scheduled signal cycle, static frontend and Postgres.
+# See "Deploying on Render" in README.md for the steps. Service names must be unique on Render; if one is taken,
+# rename it here and update CORS_ORIGINS and VITE_API_URL to match the URLs Render assigns.
+
+databases:
+  - name: marketpulse-db
+    # A paid plan: Free Postgres databases are deleted 30 days after creation, which would destroy the ledger.
+    plan: 0.1c-256mb
+    region: oregon
+    databaseName: marketpulse
+    user: marketpulse
+    # Internal connections only. To load a backtest from your own machine, temporarily allow your IP in the dashboard.
+    ipAllowList: []
+
+services:
+  # ---- API --------------------------------------------------------------------------------------------------------
+  - type: web
+    name: marketpulse-api
+    runtime: python
+    plan: free            # sleeps after 15 idle minutes and takes about a minute to wake; use a paid plan to keep it on
+    region: oregon
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    # Migrations run on every start (pre-deploy commands are not available on the free plan). Keep a single instance:
+    # rate limiting is held in process memory.
+    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeployTrigger: checksPass     # deploy only when CI passes
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: APP_ENV
+        value: production
+      - key: API_TOKEN
+        generateValue: true           # copy it from this service's Environment tab after the first deploy
+      - key: PROXY_HOPS
+        value: "1"                    # Render's proxy sits in front of the app; needed for correct per-client rate limiting
+      - key: CORS_ORIGINS
+        value: https://marketpulse-app.onrender.com
+      - key: DATABASE_URL
+        fromDatabase:
+          name: marketpulse-db
+          property: connectionString
+
+  # ---- Signal cycle (scores the watchlist and advances the paper ledger) ------------------------------------------------
+  - type: cron
+    name: marketpulse-cycle
+    runtime: python
+    region: oregon
+    rootDir: backend
+    # Every 30 minutes across the hours US markets can be open (UTC covers both daylight-saving offsets);
+    # --scheduled makes the job exit immediately outside 09:30-16:00 New York time and on weekends.
+    schedule: "*/30 13-21 * * 1-5"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m app.worker --scheduled
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: marketpulse-db
+          property: connectionString
+      - key: TWELVEDATA_API_KEY
+        sync: false                   # you are prompted for this when the Blueprint is created
+
+  # ---- Frontend -------------------------------------------------------------------------------------------------------
+  - type: web
+    name: marketpulse-app
+    runtime: static
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: frontend/dist
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: NODE_VERSION
+        value: 22.12.0
+      - key: VITE_API_URL             # baked into the build, along with the Content-Security-Policy that allows only this origin
+        value: https://marketpulse-api.onrender.com
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: no-referrer
+      - path: /*
+        name: Strict-Transport-Security
+        value: max-age=63072000; includeSubDomains
+      - path: /*
+        name: Permissions-Policy
+        value: camera=(), microphone=(), geolocation=()

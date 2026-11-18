@@ -14,6 +14,22 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: marketpulse_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # enables tests/test_postgres_smoke.py: every migration up and down, a cycle, the ledger and the API on real Postgres
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/marketpulse_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -42,3 +58,13 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm audit --omit=dev
+
+  blueprint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml jsonschema
+      - run: python .github/scripts/validate_blueprint.py render.yaml
