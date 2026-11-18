@@ -4,9 +4,10 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models import Alert, Ticker
+from app.security import PROTECTED
 from app.schemas import AlertOut
 
-router = APIRouter(prefix="/v1")
+router = APIRouter(prefix="/v1", dependencies=PROTECTED)
 
 
 @router.get("/alerts", response_model=list[AlertOut])

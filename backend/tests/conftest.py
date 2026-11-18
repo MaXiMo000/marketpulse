@@ -1,3 +1,9 @@
+import os
+
+# Tests must not depend on a developer's local .env (environment variables take priority over it).
+os.environ["APP_ENV"] = "development"
+os.environ["API_TOKEN"] = ""
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine

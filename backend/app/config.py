@@ -4,6 +4,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    # 'development' allows an empty API_TOKEN and serves API docs; any other value is treated as production
+    app_env: str = "development"
+    api_token: str = ""
     database_url: str = "sqlite:///./marketpulse.db"
     redis_url: str = "redis://localhost:6379"
     twelvedata_api_key: str = ""

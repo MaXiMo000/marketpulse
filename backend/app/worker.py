@@ -16,11 +16,11 @@ from sqlalchemy.orm import Session
 from app.clients.twelvedata import fetch_daily_closes
 from app.config import settings
 from app.db import SessionLocal
-from app.indicators import MIN_CLOSES, compute, ret
+from app.indicators import MIN_CLOSES, compute
 from app.ledger import advance_all
 from app.models import Alert, CompositeScore, PriceSnapshot, Ticker
 from app.notify import notify_flips
-from app.scoring import score
+from app.signal import evaluate
 
 log = logging.getLogger(__name__)
 SNAPSHOT_DAYS = 60
@@ -42,9 +42,7 @@ def run_cycle(session: Session, fetch, now: datetime | None = None) -> dict:
         try:
             dates = [d for d, _ in series(ticker.symbol)]
             closes = [c for _, c in series(ticker.symbol)]
-            bench_ret = ret([c for _, c in series(ticker.benchmark_symbol)], 20)
-            ind = compute(closes)
-            s = score(ind.ma20, ind.ma100, ind.rsi14, ind.ret_20d, bench_ret, ind.ann_vol_pct)
+            ind, s = evaluate(closes, [c for _, c in series(ticker.benchmark_symbol)])
             snapshots = [
                 (i, compute(closes[: i + 1]))
                 for i in range(max(MIN_CLOSES - 1, len(closes) - SNAPSHOT_DAYS), len(closes))

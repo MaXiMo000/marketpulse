@@ -7,13 +7,14 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.ledger import BUY_BANDS, SELL_BANDS, cash, fills_for, in_cooldown, latest_prices, latest_scores, position_stats
 from app.models import Portfolio, Position, Ticker
+from app.security import PROTECTED
 from app.schemas import (
     FillOut, HoldingOut, LiveAck, PlanOut, PortfolioIn, PortfolioOut, PositionOut, PositionsOut,
     ScoreOut, Summary, TodayRow, TrancheOut,
 )
 from app.sizing import plan_entry
 
-router = APIRouter(prefix="/v1/portfolios")
+router = APIRouter(prefix="/v1/portfolios", dependencies=PROTECTED)
 
 
 def _portfolio(db: Session, portfolio_id: int) -> Portfolio:

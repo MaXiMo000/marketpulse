@@ -5,9 +5,10 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models import CompositeScore, PriceSnapshot, Ticker
+from app.security import PROTECTED
 from app.schemas import History, HistoryPoint, ScoreOut, TickerIn, TickerOut, WatchlistRow
 
-router = APIRouter(prefix="/v1")
+router = APIRouter(prefix="/v1", dependencies=PROTECTED)
 
 
 @router.post("/watchlist/tickers", response_model=TickerOut, status_code=201)

@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -152,3 +152,8 @@ class AlertOut(BaseModel):
     from_score: float
     to_score: float
     direction: Literal["up", "down"]
+
+
+class BacktestOut(BaseModel):
+    created_at: datetime
+    result: dict[str, Any]
