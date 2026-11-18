@@ -11,9 +11,11 @@ entry/exit plan, every number traceable to a named, visible formula. No
 
 ## Status
 
-Phases 0–1: a worker scores a watchlist; each portfolio sizes a plan from the score
-and risk tier and tracks it in a paper ledger through to a realized outcome. The 3D
-Terrain, alerts and live mode come in later phases — see [SPEC.md](SPEC.md) §10.
+Phases 0–2: a worker scores a watchlist; each portfolio sizes a plan from the score
+and risk tier and tracks it in a paper ledger through to a realized outcome. The app
+shows the watchlist as a 3D skyline, raises an alert when a ticker's band changes, and
+gates live mode behind a dated acknowledgement. Broker execution comes in a later
+phase — see [SPEC.md](SPEC.md) §10.
 
 ## Features
 
@@ -24,14 +26,16 @@ Terrain, alerts and live mode come in later phases — see [SPEC.md](SPEC.md) §
 - Risk tiers and position sizing: the smaller of a risk-based and a tier-cap size, so the tier cap is a hard limit
 - Entry in three tranches, with stop-loss, take-profit and a trailing stop set when the plan is made
 - Paper ledger: every plan is followed to a realized outcome, wins and losses included
-- Portfolios are always created in paper mode; live mode requires a dated acknowledgement (enforced in the database)
+- Portfolios are always created in paper mode; live mode requires a dated acknowledgement (enforced in the database), and live portfolios are never simulated
+- The Terrain: the watchlist as a 3D skyline (height = score, color = band), with a pulse when a band flips
+- Alerts when a ticker's band changes between cycles, shown in the app and optionally sent by email
 - REST API with validated input and a CORS allowlist
 
 ## Stack
 
 - **Backend:** FastAPI, Arq worker, SQLAlchemy 2.0 + Alembic, httpx
 - **Data:** [Twelve Data](https://twelvedata.com) daily time series (free tier)
-- **Frontend:** React + Vite + TypeScript, TanStack Query
+- **Frontend:** React + Vite + TypeScript, TanStack Query, React Three Fiber (lazy-loaded)
 
 ## Setup
 
@@ -81,6 +85,8 @@ Each worker cycle, after scoring, every portfolio is advanced:
 | `REDIS_URL` | backend | Redis for the Arq scheduler. |
 | `TWELVEDATA_API_KEY` | backend | Twelve Data API key (free tier is enough). |
 | `CORS_ORIGINS` | backend | Comma-separated origins allowed to call the API. |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` | backend | Optional SMTP server for flip emails (STARTTLS). Email is off while `SMTP_HOST` is empty. |
+| `ALERT_EMAIL_FROM`, `ALERT_EMAIL_TO` | backend | Sender and recipient of flip emails. |
 | `VITE_API_URL` | frontend | Base URL of the API. |
 
 ## API
@@ -94,6 +100,9 @@ Each worker cycle, after scoring, every portfolio is advanced:
 | `GET /v1/portfolios` | List portfolios with free cash. |
 | `GET /v1/portfolios/{id}/today` | Every watched ticker with score, band, holding and — for Buy/Sell — a sized plan. |
 | `GET /v1/portfolios/{id}/positions` | Planned, open and closed positions with fills, P&L and a win/loss summary. |
+| `POST /v1/portfolios/{id}/live-ack` | Record the dated acknowledgement (`{"acknowledge": true}`) and switch to live mode. |
+| `POST /v1/portfolios/{id}/paper` | Return to paper mode and clear the acknowledgement. |
+| `GET /v1/alerts?limit=50` | Recent band flips, newest first. |
 | `GET /health` | Liveness check. |
 
 Interactive docs are served at `/docs`.
@@ -102,7 +111,7 @@ Interactive docs are served at `/docs`.
 
 ```bash
 cd backend && .venv/Scripts/python -m pytest
-cd frontend && npm run lint && npm run build
+cd frontend && npm run lint && npm test && npm run build
 ```
 
 ## License
