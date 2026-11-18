@@ -1,3 +1,5 @@
+import { AuthError, authHeader, clearToken, getToken } from './auth'
+
 const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
 export interface Score {
@@ -89,12 +91,17 @@ export interface Positions {
 }
 
 async function failure(res: Response, fallback: string): Promise<Error> {
+  if (res.status === 401) {
+    clearToken(getToken() !== null) // a token was sent and refused
+    return new AuthError()
+  }
+  if (res.status === 429) return new Error('Too many requests. Wait a minute and try again.')
   const body = await res.json().catch(() => null)
   return new Error(typeof body?.detail === 'string' ? body.detail : fallback)
 }
 
 async function getJson<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`)
+  const res = await fetch(`${BASE}${path}`, { headers: authHeader() })
   if (!res.ok) throw await failure(res, `request failed (${res.status})`)
   return res.json()
 }
@@ -102,7 +109,7 @@ async function getJson<T>(path: string): Promise<T> {
 async function postJson<T>(path: string, body: unknown, fallback: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
     body: JSON.stringify(body),
   })
   if (!res.ok) throw await failure(res, fallback)
@@ -145,3 +152,62 @@ export const acknowledgeLive = (id: number) =>
   postJson<Portfolio>(`/v1/portfolios/${id}/live-ack`, { acknowledge: true }, 'could not enable live mode')
 export const backToPaper = (id: number) =>
   postJson<Portfolio>(`/v1/portfolios/${id}/paper`, {}, 'could not switch to paper mode')
+
+export interface BandStat {
+  band: string
+  n: number
+  mean: number | null
+  median: number | null
+  hit_rate: number | null
+}
+
+export interface RunMetrics {
+  total_return: number
+  cagr: number | null
+  max_drawdown: number
+  volatility: number
+  sharpe: number | null
+  avg_exposure?: number
+}
+
+export type MetricKey = 'strategy' | 'equal_weight_matched' | 'benchmark_matched' | 'benchmark' | 'equal_weight'
+
+export interface Backtest {
+  created_at: string
+  result: {
+    params: { symbols: string[]; benchmark: string; tier: string; capital: number; start_date: string; end_date: string; trading_days: number }
+    calibration: Record<string, BandStat[]>
+    edge: {
+      horizon: number
+      verdict: 'supported' | 'inconclusive' | 'inverted'
+      reason: string
+      buy_mean: number | null
+      sell_mean: number | null
+      spread: number | null
+      t_stat: number | null
+    }
+    factor_ic: { factor: string; ic: number | null; t_stat: number | null; n: number }[]
+    metrics: Record<MetricKey, RunMetrics>
+    trades: {
+      closed: number
+      wins: number
+      losses: number
+      win_rate: number | null
+      avg_win_pct: number | null
+      avg_loss_pct: number | null
+      profit_factor: number | null
+      avg_days_held: number | null
+      exit_reasons: Record<string, number>
+    }
+    equity_curve: { dates: string[] } & Record<MetricKey, number[]>
+    caveats: string[]
+  }
+}
+
+/** Resolves to null when no backtest has been run yet. */
+export async function fetchBacktest(): Promise<Backtest | null> {
+  const res = await fetch(`${BASE}/v1/backtest`, { headers: authHeader() })
+  if (res.status === 404) return null
+  if (!res.ok) throw await failure(res, `request failed (${res.status})`)
+  return res.json()
+}

@@ -56,3 +56,36 @@ export function diverging(value: number, max: number): { left: number; width: nu
 export function penalty(value: number, max: number): { left: number; width: number } {
   return { left: 0, width: Math.min(100, (value / max) * 100) }
 }
+
+/** Reads a factor's information-coefficient t-statistic. Anything inside |t| < 2 is treated as noise. */
+export function icReading(t: number | null): 'helps' | 'hurts' | 'no signal' {
+  if (t === null) return 'no signal'
+  return t >= 2 ? 'helps' : t <= -2 ? 'hurts' : 'no signal'
+}
+
+export type Verdict = 'supported' | 'inconclusive' | 'inverted'
+
+export function verdictCopy(verdict: Verdict): { headline: string; tone: 'green' | 'amber' | 'red' } {
+  switch (verdict) {
+    case 'supported':
+      return { headline: 'Buy-band days out-returned Sell-band days, in the order the score intends.', tone: 'green' }
+    case 'inverted':
+      return { headline: 'The score pointed the wrong way: Sell-band days did better than Buy-band days.', tone: 'red' }
+    default:
+      return { headline: 'No evidence the score predicts returns in this test.', tone: 'amber' }
+  }
+}
+
+/** The standing sentence in every briefing about what the backtest says, so the app never implies more than it has shown. */
+export function backtestNote(verdict: Verdict | null | undefined): string {
+  switch (verdict) {
+    case 'supported':
+      return 'Backtest: the bands ordered forward returns as intended. See the Proof Lab for the limits.'
+    case 'inverted':
+      return 'Backtest: the score pointed the wrong way. See the Proof Lab.'
+    case 'inconclusive':
+      return 'Backtest: the score has not shown it predicts returns. See the Proof Lab.'
+    default:
+      return 'No backtest has been run, so this score has not been checked against history.'
+  }
+}

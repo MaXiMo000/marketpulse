@@ -1,13 +1,14 @@
 import type { Position, TodayRow } from '../lib/api'
 import { BINDING_LABEL, pnlClass, signed, signedUsd, usd } from '../lib/format'
-import { bandColor, diverging, isStrong, mission, penalty } from '../lib/hud'
+import { backtestNote, bandColor, diverging, isStrong, mission, penalty, type Verdict } from '../lib/hud'
 
 interface Props {
   row: TodayRow
   position: Position | undefined
+  verdict: Verdict | null | undefined
 }
 
-export default function MissionBriefing({ row, position }: Props) {
+export default function MissionBriefing({ row, position, verdict }: Props) {
   const { label, sub } = mission(row)
   const s = row.score
   const color = s ? bandColor(s.band) : '#8a94a6'
@@ -26,7 +27,7 @@ export default function MissionBriefing({ row, position }: Props) {
 
   return (
     <section className="panel briefing" style={{ borderColor: color, boxShadow: `0 0 30px -12px ${color}` }} aria-label={`Mission briefing for ${row.symbol}`}>
-      {s && isStrong(s.band) && <div className="stamp-top" style={{ color }}>CONVICTION: MAXED</div>}
+      {s && isStrong(s.band) && <div className="stamp-top" style={{ color }}>EXTREME READING</div>}
 
       <div className="who">
         <div className="gauge" style={{ background: `conic-gradient(${color} ${deg}deg, var(--line) 0)` }}>
@@ -107,7 +108,7 @@ export default function MissionBriefing({ row, position }: Props) {
 
       <div className="disclosure">
         <i aria-hidden="true">i</i>
-        <span>Algorithmic signal, not personalized financial advice. Every number above comes from a named formula (SPEC.md §7.2).</span>
+        <span>Algorithmic signal, not personalized financial advice. Every number above comes from a named formula (SPEC.md §7.2). {backtestNote(verdict)}</span>
       </div>
     </section>
   )

@@ -134,3 +134,24 @@ dialog .actions { display: flex; gap: 10px; justify-content: flex-end; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+.lock { padding: 6px 12px; font-size: 12px; }
+
+/* ---------- proof lab ---------- */
+.proof h3 { margin: 22px 0 8px; font-family: var(--label); font-size: 14px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); }
+.verdict { border: 2px solid; border-radius: 6px; padding: 12px 16px; margin-bottom: 8px; font-size: 14px; line-height: 1.5; }
+.verdict strong { font-family: var(--label); font-size: 17px; letter-spacing: 0.5px; display: block; margin-bottom: 4px; }
+.verdict.green { border-color: var(--buy); }
+.verdict.amber { border-color: var(--amber); }
+.verdict.red { border-color: var(--sell); }
+.proof table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+.proof th, .proof td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; font-size: 13px; }
+.proof th { color: var(--muted); font-weight: 500; }
+.proof .strong-row td { background: #0d1520; }
+.cell-bar { display: flex; align-items: center; gap: 10px; min-width: 190px; }
+.cell-bar span { width: 62px; }
+.cell-bar .track { flex: 1; }
+.caveats { margin: 0 0 8px; padding-left: 18px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.scroll { overflow-x: auto; }
+.btn[aria-pressed='true'] { border-color: var(--cyan); color: var(--cyan); }
+code { background: var(--bg); border: 1px solid var(--line); border-radius: 3px; padding: 1px 6px; font-size: 12px; }

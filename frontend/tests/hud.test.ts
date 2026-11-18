@@ -61,3 +61,29 @@ test('diverging factor bars grow from the centre line and are capped at the trac
   assert.deepEqual(penalty(7.5, 15), { left: 0, width: 50 })
   assert.deepEqual(penalty(40, 15), { left: 0, width: 100 })
 })
+
+test('a factor is only said to help or hurt when its t-statistic clears the bar', async () => {
+  const { icReading } = await import('../src/lib/hud.ts')
+  assert.equal(icReading(2.5), 'helps')
+  assert.equal(icReading(-2.5), 'hurts')
+  assert.equal(icReading(1.9), 'no signal')
+  assert.equal(icReading(-0.3), 'no signal')
+  assert.equal(icReading(null), 'no signal')
+})
+
+test('the backtest verdict wording never overclaims', async () => {
+  const { verdictCopy } = await import('../src/lib/hud.ts')
+  assert.match(verdictCopy('supported').headline, /out-returned/i)
+  assert.match(verdictCopy('inconclusive').headline, /no evidence/i)
+  assert.match(verdictCopy('inverted').headline, /wrong way/i)
+  assert.equal(verdictCopy('inconclusive').tone, 'amber')
+})
+
+test('every briefing states what the backtest has and has not shown', async () => {
+  const { backtestNote } = await import('../src/lib/hud.ts')
+  assert.match(backtestNote(null), /no backtest/i)
+  assert.match(backtestNote(undefined), /no backtest/i)
+  assert.match(backtestNote('inconclusive'), /not shown it predicts/i)
+  assert.match(backtestNote('inverted'), /wrong way/i)
+  assert.match(backtestNote('supported'), /limits/i)
+})

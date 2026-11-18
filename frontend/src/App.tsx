@@ -1,28 +1,23 @@
-import { useQuery } from '@tanstack/react-query'
-import { useMemo, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useMemo, useState } from 'react'
 import AddTicker from './components/AddTicker'
 import AlertBanner from './components/AlertBanner'
 import BattleLog from './components/BattleLog'
 import ChipRail from './components/ChipRail'
 import CreatePortfolio from './components/CreatePortfolio'
 import LiveGate from './components/LiveGate'
+import Login from './components/Login'
+import Logo from './components/Logo'
 import MissionBriefing from './components/MissionBriefing'
 import PriceChart from './components/PriceChart'
+import ProofLab from './components/ProofLab'
 import Terrain from './components/Terrain'
-import { fetchAlerts, fetchPortfolios, fetchPositions, fetchToday, type Portfolio } from './lib/api'
+import { fetchAlerts, fetchBacktest, fetchPortfolios, fetchPositions, fetchToday, type Portfolio } from './lib/api'
+import { AuthError, clearToken, useToken } from './lib/auth'
 import { usd, utc } from './lib/format'
 import { pulsingSymbols } from './lib/hud'
 
 const REFRESH_MS = 60_000
-
-function Logo() {
-  return (
-    <div className="logo">
-      <span className="reactor" aria-hidden="true" />
-      <span>MARKET<b>PULSE</b></span>
-    </div>
-  )
-}
 
 function Setup() {
   return (
@@ -44,8 +39,11 @@ function Deck({ portfolio }: { portfolio: Portfolio }) {
   const today = useQuery({ queryKey: ['today', portfolio.id], queryFn: () => fetchToday(portfolio.id), refetchInterval: REFRESH_MS })
   const positions = useQuery({ queryKey: ['positions', portfolio.id], queryFn: () => fetchPositions(portfolio.id), refetchInterval: REFRESH_MS })
   const alerts = useQuery({ queryKey: ['alerts'], queryFn: fetchAlerts, refetchInterval: REFRESH_MS })
+  const backtest = useQuery({ queryKey: ['backtest'], queryFn: fetchBacktest })
   const [picked, setPicked] = useState<string | null>(null)
   const [gateOpen, setGateOpen] = useState(false)
+  const client = useQueryClient()
+  const token = useToken()
 
   const rows = useMemo(() => today.data ?? [], [today.data])
   const selected = rows.find((r) => r.symbol === picked) ?? rows[0]
@@ -69,6 +67,18 @@ function Deck({ portfolio }: { portfolio: Portfolio }) {
           <i aria-hidden="true" />
           {isLive ? 'LIVE — ARMED' : 'PAPER MODE'}
         </button>
+        {token && (
+          <button
+            type="button"
+            className="btn ghost lock"
+            onClick={() => {
+              clearToken()
+              client.clear()
+            }}
+          >
+            Lock
+          </button>
+        )}
       </header>
 
       <AlertBanner alerts={alerts.data ?? []} onSelect={setPicked} />
@@ -95,10 +105,15 @@ function Deck({ portfolio }: { portfolio: Portfolio }) {
             <MissionBriefing
               row={selected}
               position={positions.data?.positions.find((p) => p.symbol === selected.symbol && p.status !== 'closed')}
+              verdict={backtest.data?.result.edge.verdict}
             />
           )}
           {positions.data && <BattleLog data={positions.data} mode={portfolio.mode} />}
         </div>
+      </div>
+
+      <div className="deck" style={{ gridTemplateColumns: 'minmax(0, 1fr)', paddingTop: 0 }}>
+        <ProofLab />
       </div>
 
       <LiveGate portfolio={portfolio} open={gateOpen} onClose={() => setGateOpen(false)} />
@@ -107,7 +122,14 @@ function Deck({ portfolio }: { portfolio: Portfolio }) {
 }
 
 export default function App() {
+  const client = useQueryClient()
+  const token = useToken()
   const portfolios = useQuery({ queryKey: ['portfolios'], queryFn: fetchPortfolios, refetchInterval: REFRESH_MS })
+  // a new or cleared token means every cached response is stale
+  useEffect(() => {
+    void client.invalidateQueries()
+  }, [client, token])
+  if (portfolios.error instanceof AuthError) return <Login />
   if (portfolios.isPending) return <p className="muted" style={{ padding: 24 }}>Loading…</p>
   if (portfolios.isError) return <p role="alert" className="error" style={{ padding: 24 }}>{portfolios.error.message}</p>
   const portfolio = portfolios.data[0]

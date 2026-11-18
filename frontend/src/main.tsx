@@ -9,9 +9,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App.tsx'
+import { AuthError } from './lib/auth'
 import './index.css'
 
-const queryClient = new QueryClient()
+// An auth failure is not transient: retrying would only feed the server's lockout counter.
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { retry: (count, error) => !(error instanceof AuthError) && count < 2 } },
+})
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
